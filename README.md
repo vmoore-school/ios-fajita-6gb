@@ -121,6 +121,32 @@ tools/sweet-log.py fajita-logs/<newest>.txt --grep GPU
 After a hard hang, a photo of the panel is authoritative — the ring can be stale if the
 panic happened during a flush.
 
+## Notes for this fork (6 GB 6T, Linux host)
+
+Tested on a 6 GB OnePlus 6T (A6013, SDM845 v2.1, OxygenOS 11.1.2.2 firmware): it boots to
+the lock screen with the upstream kernel, unchanged.
+
+- **6 GB RAM.** Upstream hands XNU `0x17c8a0000` bytes above 4 GiB, which only exists on
+  8 GB units. On 6 GB the bank is `0x100000000..0x1fd4a0000` (`/proc/iomem`), so
+  `tools/build-fajita.sh` now passes `--dram-size=0xfcc00000` by default. On an 8 GB phone
+  build with `DRAM_SIZE= tools/build-fajita.sh` (empty) to get the old value.
+- **Boot image size.** Without `adreno=` in `CMDLINE` the GPU arena defaults to 1 MiB; the
+  64 MiB arena makes an ~86 MB image that does not fit the 64 MiB `boot_a`.
+- **Root image on Linux.** `sudo tools/build-root-container.sh IPSW OUTDIR` (or `pkexec`)
+  runs `mkiosroot.sh` + `sweet-root-tweaks.py` + `img2simg` in a throwaway privileged Fedora
+  container. It needs an upstream `apfs-fuse` (sgan81, 2023 or newer; set `APFS_FUSE=`):
+  distro packages are a 2020 snapshot without LZBITMAP, and every iOS 16 file then fails
+  with `Input/output error`. Building it with GCC 16 / CMake 4 needs
+  `-DCMAKE_POLICY_VERSION_MINIMUM=3.5 '-DCMAKE_CXX_FLAGS=-include vector -include cstdint'`.
+- **First boot sits on the Apple logo for ~15 minutes** (`com.apple.datamigrator`). Don't
+  interrupt it, or it starts over; later boots take ~4–5 minutes.
+- **Recovery on the stock ABL.** It has no `reboot-recovery`, and `fastboot boot` always
+  starts a normal boot, so a recovery image never reaches recovery mode that way. What works:
+  LineageOS recovery (`boot`, `dtbo`, `vbmeta` from a fajita build) flashed to **slot b**,
+  `fastboot --set-active=b`, then pick *Recovery mode* in the bootloader menu and enable ADB.
+  `tools/sweet-log-pull.sh` then works as is; `fastboot --set-active=a` returns to iOS.
+- **After the 12 GB userdata flash** fastboot may stop answering: hold Power + Volume Down.
+
 ## The GPU
 
 The bring-up follows the ladder of HackiOS (`oosexgang`) and Bergamota (`ry-diffusion`), which

@@ -54,7 +54,11 @@ CMDLINE=${CMDLINE:-"debug=0xc serial=3 cpus=8 sweetsmp=1 keepsyms=1 -noprogress 
 [[ -f "$DTB" ]] || { echo "missing stock DTB: $DTB (unpack the OnePlus boot.img first)" >&2; exit 1; }
 
 mkdir -p shim/out
-python3 tools/mkadt.py "$ADT" --highmem
+# 6 GB units: DRAM above 4G is only 0x100000000..0x1FD4A0000 (from /proc/zoneinfo
+# on OOS 11), so the 8 GB default (0x17c8a0000) would overrun it. 0xfcc00000 is
+# the sweet-proven size and fits. Set DRAM_SIZE= (empty) for the 8 GB default.
+DRAM_SIZE=${DRAM_SIZE-0xfcc00000}
+python3 tools/mkadt.py "$ADT" --highmem ${DRAM_SIZE:+--dram-size=$DRAM_SIZE}
 # Firmware the drivers want before there is a root travels in the payload, not
 # in git: mkpayload.py --blob announces each file as sweetfwN=<pa>:<size>.
 BLOB_ARGS=()
@@ -95,7 +99,10 @@ BLOB_ARGS+=(--blob "$GMEM_BLOB")
 # Size in MiB: Metal needs buffers/textures far beyond the old 1 MiB, and this blob is the only
 # GPU memory the pmap never has to touch. It travels in the payload, so it costs boot-image size,
 # not a userdata flash.
-ARENA_MIB=${ARENA_MIB:-64}
+# Without the GPU boot-args (no adreno= in CMDLINE) the arena is unused, and 64 MiB pushes
+# the image to ~86 MB, past the 64 MiB boot_a partition: default to 1 MiB in that case.
+if [[ "$CMDLINE" == *adreno=* ]]; then ARENA_DEFAULT=64; else ARENA_DEFAULT=1; fi
+ARENA_MIB=${ARENA_MIB:-$ARENA_DEFAULT}
 ARENA_BLOB=${ARENA_BLOB:-$HOME/gpu-fw/arena.bin}
 if [[ ! -f "$ARENA_BLOB" || $(stat -c%s "$ARENA_BLOB" 2>/dev/null || echo 0) -ne $((ARENA_MIB * 1048576)) ]]; then
 	mkdir -p "$(dirname "$ARENA_BLOB")"
@@ -117,6 +124,6 @@ python3 tools/mkpayload.py "$XNU_KERNEL" "$ADT" "$PAYLOAD" --cmdline "$CMDLINE" 
 # shim/build.sh cds into shim/, so hand it absolute paths. SHIM_HDR=1 is the
 # stock fajita layout (header v1, gzipped Image.gz-dtb): a v2 header with a dtb
 # section and a raw Image does not boot on this ABL.
-SHIM_HDR=1 DTB=$(realpath "$DTB") shim/build.sh "$(realpath "$PAYLOAD")"
+SHIM_HDR=1 DTB=$(realpath "$DTB") bash shim/build.sh "$(realpath "$PAYLOAD")"
 
 echo "built: shim/out/shim-boot.img"
